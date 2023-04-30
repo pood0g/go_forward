@@ -12,31 +12,51 @@ import (
 	// "github.com/akamensky/argparse"
 )
 
+var knownHostsFile = "./known_hosts"
+
+func checkFileExists(fileName string) {
+	if _, err := os.Stat(fileName); err != nil {
+		os.Create(fileName)
+		os.Chmod(fileName, 0600)
+	}
+}
+
+func appendToFile(fileName, line string) {
+	file, _ := os.OpenFile(fileName, os.O_APPEND|os.O_WRONLY, 0600)
+	file.WriteString(line)
+}
+
+func askUserBool(question string) bool {
+	var vrfy string
+	fmt.Print(question)
+	fmt.Scanln(&vrfy)
+	fmt.Println()
+	if vrfy == "y" || vrfy == "Y" {
+		return true
+	}
+	return false
+}
+
 func getHostKey(hostname string, remote net.Addr, key ssh.PublicKey) error {
 
 	// manually verify host key.
 	// TODO implement known_hosts file reading
 	var known error
+	checkFileExists(knownHostsFile)
 
 	fmt.Printf("Connected to %s\nHostKey: %s\n", hostname, ssh.MarshalAuthorizedKey(key))
 
 	khFile, err := kh.New("./known_hosts")
 	if err != nil {
-		log.Printf("KnownHosts: %s", err)
-	} else {
-		if known := khFile(hostname, remote, key); known != nil {
+		return fmt.Errorf("%s", err)
+	}
 
-			var vrfy string
-			fmt.Print("Host unknown, do you want to connect anyway (y/n)? ")
-			fmt.Scanln(&vrfy)
-			fmt.Println()
-			if vrfy == "y" || vrfy == "Y" {
-				khline := kh.Line([]string{hostname}, key) + "\n"
-				os.WriteFile("./known_hosts", []byte(khline), 0640)
-				return nil
-			} else {
-				return fmt.Errorf("host key rejected by user")
-			}
+	if known = khFile(hostname, remote, key); known != nil {
+		if askUserBool("Host unknown, do you want to connect and add to known hosts (y/n)? ") {
+			appendToFile(knownHostsFile, kh.Line([]string{hostname}, key))
+			return nil
+		} else {
+			return fmt.Errorf("host key rejected by user")
 		}
 	}
 	return known
@@ -91,7 +111,7 @@ func main() {
 	// create SSH connection
 	sshConn, err := ssh.Dial("tcp", "127.0.0.1:22", cfg)
 	if err != nil {
-		log.Fatalf("SSH: %s\n", err)
+		log.Fatalf("%s\n", err)
 	} else {
 		fmt.Printf("Server: %s\n", sshConn.ServerVersion())
 	}
