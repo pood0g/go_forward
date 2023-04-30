@@ -5,31 +5,45 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 
 	"golang.org/x/crypto/ssh"
+	kh "golang.org/x/crypto/ssh/knownhosts"
 	// "github.com/akamensky/argparse"
 )
 
 func getHostKey(hostname string, remote net.Addr, key ssh.PublicKey) error {
-	
+
 	// manually verify host key.
 	// TODO implement known_hosts file reading
-	var vrfy string
-	
+	var known error
+
 	fmt.Printf("Connected to %s\nHostKey: %s\n", hostname, ssh.MarshalAuthorizedKey(key))
-	fmt.Print("Do you want to connect (y/n)? ")
-	fmt.Scanln(&vrfy)
-	fmt.Println()
-	if vrfy == "y" || vrfy == "Y" {
-		return nil
+
+	khFile, err := kh.New("./known_hosts")
+	if err != nil {
+		log.Printf("KnownHosts: %s", err)
 	} else {
-		return fmt.Errorf("host key rejected by user")
+		if known := khFile(hostname, remote, key); known != nil {
+
+			var vrfy string
+			fmt.Print("Host unknown, do you want to connect anyway (y/n)? ")
+			fmt.Scanln(&vrfy)
+			fmt.Println()
+			if vrfy == "y" || vrfy == "Y" {
+				khline := kh.Line([]string{hostname}, key) + "\n"
+				os.WriteFile("./known_hosts", []byte(khline), 0640)
+				return nil
+			} else {
+				return fmt.Errorf("host key rejected by user")
+			}
+		}
 	}
+	return known
 }
 
 func makeSshConfig(user, password string) *ssh.ClientConfig {
-	
-	
+
 	config := ssh.ClientConfig{
 		User: user,
 		Auth: []ssh.AuthMethod{
@@ -63,7 +77,7 @@ func handleConn(remote net.Conn, local net.Conn) {
 		}
 		done <- true
 	}()
-	
+
 	<-done
 }
 
