@@ -6,23 +6,40 @@ import (
 	"log"
 	"net"
 	"os"
+	"bufio"
 
 	"golang.org/x/crypto/ssh"
-	kh "golang.org/x/crypto/ssh/knownhosts"
 	// "github.com/akamensky/argparse"
 )
 
 var knownHostsFile = "./known_hosts"
 
-func checkFileExists(fileName string) {
-	if _, err := os.Stat(fileName); err != nil {
-		os.Create(fileName)
-		os.Chmod(fileName, 0600)
+func getKhFile(fileName, hostKey string) error {
+	_, err := os.Stat(fileName)
+	if err != nil {
+		log.Println("Known hosts file doesnt exist, creating...")
+		os.Create(knownHostsFile)
+		os.Chmod(knownHostsFile, 0600)
+		return getKhFile(fileName, hostKey)
 	}
+	khFile, err := os.OpenFile(fileName, os.O_RDONLY, 0600)
+	if err != nil {
+		log.Fatalln("It's Dead Jim")
+	}
+	defer khFile.Close()
+
+	scanner := bufio.NewScanner(khFile)
+	for scanner.Scan() {
+		if hostKey == scanner.Text() + "\n" {
+			return nil
+		}
+	}
+	return fmt.Errorf("key not found in file")
 }
 
-func appendToFile(fileName, line string) {
-	file, _ := os.OpenFile(fileName, os.O_APPEND|os.O_WRONLY, 0600)
+func writeToFile(fileName, line string) {
+	file, _ := os.OpenFile(fileName, os.O_WRONLY, 0600)
+	file.Seek(0,2)
 	file.WriteString(line)
 }
 
@@ -39,21 +56,15 @@ func askUserBool(question string) bool {
 
 func getHostKey(hostname string, remote net.Addr, key ssh.PublicKey) error {
 
-	// manually verify host key.
-	// TODO implement known_hosts file reading
+	// function for user to manually verify host key.
 	var known error
-	checkFileExists(knownHostsFile)
 
-	fmt.Printf("Connected to %s\nHostKey: %s\n", hostname, ssh.MarshalAuthorizedKey(key))
+	hostKey := string(ssh.MarshalAuthorizedKey(key))
+	fmt.Printf("Connected to %s\nHostKey: %s\n", hostname, hostKey)
 
-	khFile, err := kh.New("./known_hosts")
-	if err != nil {
-		return fmt.Errorf("%s", err)
-	}
-
-	if known = khFile(hostname, remote, key); known != nil {
+	if known := getKhFile(knownHostsFile, fmt.Sprintf("%s %s", hostname, hostKey)); known != nil {
 		if askUserBool("Host unknown, do you want to connect and add to known hosts (y/n)? ") {
-			appendToFile(knownHostsFile, kh.Line([]string{hostname}, key))
+			writeToFile(knownHostsFile, fmt.Sprintf("%s %s", hostname, ssh.MarshalAuthorizedKey(key)))
 			return nil
 		} else {
 			return fmt.Errorf("host key rejected by user")
@@ -72,6 +83,7 @@ func makeSshConfig(user, password string) *ssh.ClientConfig {
 		HostKeyAlgorithms: []string{
 			// add more key algorithms if needed this is normally used by default in OpenSSHd
 			ssh.KeyAlgoED25519,
+			ssh.KeyAlgoRSASHA512,
 		},
 		HostKeyCallback: getHostKey,
 	}
