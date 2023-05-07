@@ -1,18 +1,88 @@
 package main
 
 import (
+	"bufio"
+	b64 "encoding/base64"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
-	"bufio"
 
+	"github.com/akamensky/argparse"
 	"golang.org/x/crypto/ssh"
-	// "github.com/akamensky/argparse"
 )
 
 var knownHostsFile = "./known_hosts"
+
+const BANNER = `
+ICAgICAgICAgICAgICAgICAgICAgX19fXyAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg
+ICAgX18KICAgX19fXyBfX19fXyAgICAgICAvIF9fL19fXyAgX19fX19fICAgICAgX19fX19fIF9f
+X19fX19fX18vIC8KICAvIF9fIGAvIF9fIFwgICAgIC8gL18vIF9fIFwvIF9fXy8gfCAvfCAvIC8g
+X18gYC8gX19fLyBfXyAgLyAKIC8gL18vIC8gL18vIC8gICAgLyBfXy8gL18vIC8gLyAgIHwgfC8g
+fC8gLyAvXy8gLyAvICAvIC9fLyAvICAKIFxfXywgL1xfX19fL19fX18vXy8gIFxfX19fL18vICAg
+IHxfXy98X18vXF9fLF8vXy8gICBcX18sXy8gICAKL19fX18vICAgICAvX19fX18vICAgICAgICAg
+ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAK`
+
+type Arguments struct {
+	remotePort string
+	localPort  string
+	remoteHost string
+	sshPort string
+	userName   string
+	passWord   string
+}
+
+func getArgs() Arguments {
+
+	parser := argparse.NewParser("go_forward", "A simple SSH client allowing reverse port forwarding.")
+
+	localPort := parser.String("l", "local_port",
+		&argparse.Options{
+			Required: true,
+			Help:     "The local port to forward on the remote machine",
+		})
+	remotePort := parser.String("r", "remote_port",
+		&argparse.Options{
+			Required: true,
+			Help:     "The port to forward to on the remote",
+		})
+	sshPort := parser.String("R", "ssh_port",
+		&argparse.Options{
+			Required: true,
+			Help:     "The port to forward to on the remote",
+		})
+	remoteHost := parser.String("i", "remote_host",
+		&argparse.Options{
+			Required: true,
+			Help:     "The remote host to connect to via SSH",
+		})
+	userName := parser.String("U", "username",
+		&argparse.Options{
+			Required: true,
+			Help:     "The username for authentication to the SSH server (Required)",
+		})
+	passWord := parser.String("P", "password",
+		&argparse.Options{
+			Required: true,
+			Help:     "The password for authentication to the SSH server (Required)",
+		})
+
+	argErr := parser.Parse(os.Args)
+
+	if argErr != nil {
+		log.Fatal(parser.Usage(argErr))
+	}
+
+	return Arguments{
+		remotePort: *remotePort,
+		localPort:  *localPort,
+		remoteHost: *remoteHost,
+		sshPort: *sshPort,
+		userName:   *userName,
+		passWord:   *passWord,
+	}
+}
 
 func getKhFile(fileName, hostKey string) error {
 	_, err := os.Stat(fileName)
@@ -30,16 +100,17 @@ func getKhFile(fileName, hostKey string) error {
 
 	scanner := bufio.NewScanner(khFile)
 	for scanner.Scan() {
-		if hostKey == scanner.Text() + "\n" {
+		if hostKey == scanner.Text()+"\n" {
+			log.Println("Host is known, connecting.")
 			return nil
 		}
 	}
-	return fmt.Errorf("key not found in file")
+	return fmt.Errorf("key not found in %s", knownHostsFile)
 }
 
 func writeToFile(fileName, line string) {
 	file, _ := os.OpenFile(fileName, os.O_WRONLY, 0600)
-	file.Seek(0,2)
+	file.Seek(0, 2)
 	file.WriteString(line)
 }
 
@@ -60,10 +131,13 @@ func getHostKey(hostname string, remote net.Addr, key ssh.PublicKey) error {
 	var known error
 
 	hostKey := string(ssh.MarshalAuthorizedKey(key))
-	fmt.Printf("Connected to %s\nHostKey: %s\n", hostname, hostKey)
+	log.Printf("Connected to %s", hostname)
 
-	if known := getKhFile(knownHostsFile, fmt.Sprintf("%s %s", hostname, hostKey)); known != nil {
-		if askUserBool("Host unknown, do you want to connect and add to known hosts (y/n)? ") {
+	if err := getKhFile(knownHostsFile, fmt.Sprintf("%s %s", hostname, hostKey)); err != nil {
+		log.Println(err)
+		fmt.Printf("\nHostKey: %s", hostKey)
+
+		if askUserBool("\nHost unknown, do you want to connect and add to known hosts (y/n)? ") {
 			writeToFile(knownHostsFile, fmt.Sprintf("%s %s", hostname, ssh.MarshalAuthorizedKey(key)))
 			return nil
 		} else {
@@ -115,25 +189,28 @@ func handleConn(remote net.Conn, local net.Conn) {
 
 func main() {
 
-	fmt.Print("Welcome to go_forward, an ssh port forwarder\n\n")
+	banner, _ := b64.StdEncoding.DecodeString(BANNER)
+	fmt.Printf("%s\n", banner)
+
+	args := getArgs()
 
 	// get configuration
-	cfg := makeSshConfig("test", "test1234")
+	cfg := makeSshConfig(args.userName, args.passWord)
 
 	// create SSH connection
-	sshConn, err := ssh.Dial("tcp", "127.0.0.1:22", cfg)
+	sshConn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%s", args.remoteHost, args.sshPort), cfg)
 	if err != nil {
 		log.Fatalf("%s\n", err)
 	} else {
-		fmt.Printf("Server: %s\n", sshConn.ServerVersion())
+		log.Printf("Remote: %s\n", sshConn.ServerVersion())
 	}
 
 	// Reverse port forward
-	remotePort, err := sshConn.Listen("tcp", "127.0.0.1:1085")
+	remotePort, err := sshConn.Listen("tcp", fmt.Sprintf("127.0.0.1:%s", args.remotePort))
 	if err != nil {
 		log.Fatalf("Could not open remote port: %s", err)
 	} else {
-		fmt.Printf("Port forward successful.")
+		log.Printf("Port forward successful.")
 	}
 
 	// close conn cleanly when main() is completed
@@ -149,7 +226,7 @@ func main() {
 		}
 
 		// try to connect to local service, continue if unsuccessful
-		local, err := net.Dial("tcp", "127.0.0.1:1080")
+		local, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%s", args.remotePort))
 		if err != nil {
 			log.Printf("Local: %s", err)
 			remote.Close()
