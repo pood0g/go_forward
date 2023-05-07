@@ -39,23 +39,25 @@ func getArgs() Arguments {
 
 	localPort := parser.String("l", "local_port",
 		&argparse.Options{
-			Required: true,
-			Help:     "The local port to forward on the remote machine",
+			Required: false,
+			Help:     "The local port to forward on the remote machine (Optional)",
+			Default: "1080",
 		})
 	remotePort := parser.String("r", "remote_port",
 		&argparse.Options{
-			Required: true,
-			Help:     "The port to forward to on the remote",
+			Required: false,
+			Help:     "The port to forward to on the remote (Optional)",
+			Default: "1080",
 		})
 	sshPort := parser.String("R", "ssh_port",
 		&argparse.Options{
 			Required: true,
-			Help:     "The port to forward to on the remote",
+			Help:     "The port to forward to on the remote (Required)",
 		})
-	remoteHost := parser.String("i", "remote_host",
+	remoteHost := parser.String("i", "ssh_host",
 		&argparse.Options{
 			Required: true,
-			Help:     "The remote host to connect to via SSH",
+			Help:     "The remote host to connect to via SSH (Required)",
 		})
 	userName := parser.String("U", "username",
 		&argparse.Options{
