@@ -55,6 +55,12 @@ func get_args(argv []string) Arguments {
 		Help: "Run in the background as a daemon, logging to --log-file (Optional)",
 	})
 
+	addKey := parser.String("a", "add-key",
+	&argparse.Options{
+		Required: false,
+		Help: "Add a public key to the --authorized-keys file and exit. Takes an OpenSSH public key line or the path to a .pub file (Optional)",
+	})
+
 	stop := parser.Flag("s", "stop",
 	&argparse.Options{
 		Required: false,
@@ -81,7 +87,11 @@ func get_args(argv []string) Arguments {
 		log.Fatal(parser.Usage(argErr))
 	}
 
-	if !*stop {
+	if *addKey != "" && *authorizedKeys == "" {
+		log.Fatal(parser.Usage("--authorized-keys is required with --add-key"))
+	}
+
+	if !*stop && *addKey == "" {
 		if *userName == "" {
 			log.Fatal(parser.Usage("--username is required"))
 		}
@@ -99,6 +109,7 @@ func get_args(argv []string) Arguments {
 		authorizedKeysFile: *authorizedKeys,
 		daemon: *daemon,
 		stop: *stop,
+		addKey: *addKey,
 		pidFile: *pidFile,
 		logFile: *logFile,
 	}

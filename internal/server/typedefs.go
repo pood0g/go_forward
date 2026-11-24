@@ -11,4 +11,5 @@ type Arguments struct {
 	stop bool
 	pidFile string
 	logFile string
+	addKey string
 }

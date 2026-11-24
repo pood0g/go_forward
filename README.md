@@ -39,6 +39,7 @@ both.
     ./go_forward server -U <user> -K authorized_keys
     ./go_forward server -d -U <user> -K authorized_keys     # run as a daemon
     ./go_forward server -s                                  # stop the daemon
+    ./go_forward server -a ./id_ed25519.pub -K authorized_keys
 
 - `-U, --username` (required unless `-s`): the single user allowed to log in.
 - `-P, --password` (optional): password for that user.
@@ -49,6 +50,8 @@ both.
 - `-p, --port` (default `22`), `-i, --interface` (default `0.0.0.0`).
 - `-d, --daemon`: run in the background. The parent prints the daemon's pid and exits.
 - `-s, --stop`: stop the daemon recorded in the pid file.
+- `-a, --add-key <key or .pub file>`: add a public key to the `--authorized-keys` file and exit. The
+  server does not start. Adding a key that is already present does nothing.
 - `--pid-file` (default `go_forward_server.pid`), `--log-file` (default `go_forward_server.log`).
 
 At least one of `--password` or `--authorized-keys` is required.
@@ -73,15 +76,24 @@ Connects to a server and opens a remote port there, forwarding each connection t
 
     ./go_forward client -i <server> -R <ssh port> -U <user> -P <password>
     ./go_forward client -i <server> -R <ssh port> -U <user> -k <private key>
+    ./go_forward client -g -k ./id_ed25519                  # create a key pair
 
 - `-i, --ssh_host` (required): server address.
 - `-R, --ssh_port` (required): port the server's SSH listener is on.
 - `-U, --username` (required): user to log in as.
 - `-P, --password` (optional): password. One of `--password` or `--identity` is required.
 - `-k, --identity` (optional): private key file. Encrypted keys prompt for the passphrase.
+- `-g, --generate-key`: create an unencrypted ed25519 key pair at the `--identity` path (private key
+  mode 0600, public key at `<path>.pub`), print the public key and exit. Existing files are never
+  overwritten.
 - `-r, --remote_port` (default `1080`): port to open on the server. `0` lets the server pick a free
   port; the port it chose is printed in the log.
 - `-l, --local_port` (default `1080`): local port that receives the forwarded connections.
+
+Key setup:
+
+    ./go_forward client -g -k ./id_ed25519
+    ./go_forward server -a ./id_ed25519.pub -K authorized_keys
 
 Host keys are checked against `./known_hosts`. An unknown host key asks for confirmation before it
 is saved.

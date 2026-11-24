@@ -15,6 +15,13 @@ func Run(argv []string) {
 
 	arguments := get_args(argv)
 
+	if arguments.addKey != "" {
+		if err := addAuthorizedKey(arguments.authorizedKeysFile, arguments.addKey); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
 	if arguments.stop {
 		stopDaemon(arguments.pidFile)
 		return

@@ -25,6 +25,7 @@ type Arguments struct {
 	userName   string
 	passWord   string
 	identity   string
+	generateKey bool
 }
 
 // getArgs parses argv, where argv[0] is the program name.
@@ -46,18 +47,23 @@ func getArgs(argv []string) Arguments {
 		})
 	sshPort := parser.String("R", "ssh_port",
 		&argparse.Options{
-			Required: true,
-			Help:     "The port the SSH server listens on (Required)",
+			Required: false,
+			Help:     "The port the SSH server listens on (Required unless --generate-key)",
 		})
 	remoteHost := parser.String("i", "ssh_host",
 		&argparse.Options{
-			Required: true,
-			Help:     "The remote host to connect to via SSH (Required)",
+			Required: false,
+			Help:     "The remote host to connect to via SSH (Required unless --generate-key)",
 		})
 	userName := parser.String("U", "username",
 		&argparse.Options{
-			Required: true,
-			Help:     "The username for authentication to the SSH server (Required)",
+			Required: false,
+			Help:     "The username for authentication to the SSH server (Required unless --generate-key)",
+		})
+	generateKey := parser.Flag("g", "generate-key",
+		&argparse.Options{
+			Required: false,
+			Help:     "Generate an ed25519 key pair at the --identity path, print the public key and exit (Optional)",
 		})
 	passWord := parser.String("P", "password",
 		&argparse.Options{
@@ -76,6 +82,16 @@ func getArgs(argv []string) Arguments {
 		log.Fatal(parser.Usage(argErr))
 	}
 
+	if *generateKey {
+		if *identity == "" {
+			log.Fatal(parser.Usage("--identity is required with --generate-key"))
+		}
+		return Arguments{identity: *identity, generateKey: true}
+	}
+
+	if *sshPort == "" || *remoteHost == "" || *userName == "" {
+		log.Fatal(parser.Usage("--ssh_port, --ssh_host and --username are required"))
+	}
 	if *passWord == "" && *identity == "" {
 		log.Fatal(parser.Usage("one of --password or --identity is required"))
 	}
@@ -243,6 +259,13 @@ func handleConn(remote net.Conn, local net.Conn) {
 func Run(argv []string) {
 
 	args := getArgs(argv)
+
+	if args.generateKey {
+		if err := generateKeyPair(args.identity); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 
 	// get configuration
 	cfg, err := makeSshConfig(args.userName, args.passWord, args.identity)
