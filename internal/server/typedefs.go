@@ -15,4 +15,6 @@ type Arguments struct {
 	dynamicAddr        string
 	dynamicUser        string
 	dynamicPass        string
+	keepAlive          int
+	keepAliveMax       int
 }

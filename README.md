@@ -62,6 +62,7 @@ both.
 - `-D, --dynamic [addr:]port`: start a SOCKS5 proxy on the server. Its connections leave from the
   connected client. A bare port listens on 127.0.0.1.
 - `--dynamic-auth user:password` (optional): login required by the `--dynamic` proxy.
+- `--keepalive` (default `15`), `--keepalive-max` (default `3`): see [Keepalives](#keepalives).
 - `--pid-file` (default `go_forward_server.pid`), `--log-file` (default `go_forward_server.log`).
 
 At least one of `--password` or `--authorized-keys` is required.
@@ -107,6 +108,7 @@ OpenSSH and can each be repeated. With no forwards the client only connects, whi
 - `-D, --dynamic [bind:]port`: start a SOCKS5 proxy on the client whose connections leave from the
   server.
 - `--dynamic-auth user:password` (optional): login required by the SOCKS proxies from `-D` and `-R`.
+- `--keepalive` (default `15`), `--keepalive-max` (default `3`): see [Keepalives](#keepalives).
 
 `bind` defaults to `127.0.0.1`; `*` or an empty bind (`:1080`) listens on all interfaces.
 
@@ -136,6 +138,20 @@ it connects, and requests fail while no client is connected. Several can be used
 Host names sent to the proxy are looked up on the side connections leave from, so names that only
 resolve on the far network work, and no DNS lookups happen on the proxy's side. These proxies support
 CONNECT only (TCP); BIND and UDP ASSOCIATE would open sockets on the wrong machine.
+
+## Keepalives
+
+Both sides send an SSH keepalive (`keepalive@openssh.com`, as OpenSSH does) every `--keepalive`
+seconds, and close the connection after `--keepalive-max` of them in a row get no reply. With the
+defaults a dead peer is noticed within about 45 seconds:
+
+- The client exits instead of hanging on a connection that no longer works.
+- The server drops the dead client and frees its remote forward ports, so a client that reconnects
+  can bind the same ports again.
+- Regular traffic keeps NAT and firewall state alive on idle connections.
+
+`--keepalive 0` turns keepalives off. Any SSH peer works on the other end, since even peers that do
+not know the request reply to it.
 
 ## socks
 

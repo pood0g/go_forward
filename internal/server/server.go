@@ -5,8 +5,10 @@ import (
 	"log"
 	"net"
 	"os"
+	"time"
 
 	"github.com/gliderlabs/ssh"
+	gossh "golang.org/x/crypto/ssh"
 
 	"go_forward/internal/socks"
 	"go_forward/internal/tunnel"
@@ -90,6 +92,16 @@ func newServer(arguments Arguments) (*ssh.Server, error) {
 		Version: "go_forward_server",
 	}
 
+	interval := time.Duration(arguments.keepAlive) * time.Second
+	if interval > 0 {
+		// Closing dead clients also frees their remote forward ports, so a
+		// client that reconnects can bind them again.
+		server.ConnCallback = func(ctx ssh.Context, conn net.Conn) net.Conn {
+			go keepAlive(ctx, interval, arguments.keepAliveMax)
+			return conn
+		}
+	}
+
 	server.AddHostKey(hostKey)
 
 	if arguments.passWord != "" {
@@ -106,4 +118,22 @@ func newServer(arguments Arguments) (*ssh.Server, error) {
 	}
 
 	return server, nil
+}
+
+// keepAlive sends keepalives on the connection behind ctx once its handshake
+// has finished, until it closes.
+func keepAlive(ctx ssh.Context, interval time.Duration, max int) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if conn, ok := ctx.Value(ssh.ContextKeyConn).(*gossh.ServerConn); ok {
+			tunnel.KeepAlive(conn, interval, max, ctx.Done())
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }

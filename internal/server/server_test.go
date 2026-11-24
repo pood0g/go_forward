@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	gossh "golang.org/x/crypto/ssh"
 
@@ -71,6 +72,57 @@ func TestServerAuth(t *testing.T) {
 		if client != nil {
 			client.Close()
 		}
+	}
+}
+
+// TestServerDropsDeadClient checks that a client which stops answering
+// keepalives is disconnected and its remote forward port freed, so a
+// reconnecting client can bind it again.
+func TestServerDropsDeadClient(t *testing.T) {
+	addr := startServer(t, Arguments{userName: "user", passWord: "secret", keepAlive: 1, keepAliveMax: 1})
+
+	tcp, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, chans, reqs, err := gossh.NewClientConn(tcp, addr, &gossh.ClientConfig{
+		User:            "user",
+		Auth:            []gossh.AuthMethod{gossh.Password("secret")},
+		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	go func() {
+		for ch := range chans {
+			ch.Reject(gossh.Prohibited, "")
+		}
+	}()
+	_ = reqs // never read, so the server's keepalives get no reply
+
+	ok, reply, err := conn.SendRequest("tcpip-forward", true,
+		gossh.Marshal(&remoteForwardRequest{BindAddr: "127.0.0.1", BindPort: 0}))
+	if err != nil || !ok {
+		t.Fatalf("tcpip-forward: %v %v", ok, err)
+	}
+	var bound remoteForwardSuccess
+	if err := gossh.Unmarshal(reply, &bound); err != nil {
+		t.Fatal(err)
+	}
+	fwd := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(bound.BindPort)))
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		l, err := net.Listen("tcp", fwd)
+		if err == nil {
+			l.Close()
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("forward port %s still held by the dead client: %v", fwd, err)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 

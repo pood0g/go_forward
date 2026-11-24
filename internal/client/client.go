@@ -20,17 +20,19 @@ import (
 var knownHostsFile = "./known_hosts"
 
 type Arguments struct {
-	remoteHost  string
-	sshPort     string
-	userName    string
-	passWord    string
-	identity    string
-	generateKey bool
-	local       []tunnel.Forward
-	remote      []tunnel.Forward
-	dynamic     []tunnel.Forward
-	dynamicUser string
-	dynamicPass string
+	remoteHost   string
+	sshPort      string
+	userName     string
+	passWord     string
+	identity     string
+	generateKey  bool
+	local        []tunnel.Forward
+	remote       []tunnel.Forward
+	dynamic      []tunnel.Forward
+	dynamicUser  string
+	dynamicPass  string
+	keepAlive    int
+	keepAliveMax int
 }
 
 // getArgs parses argv, where argv[0] is the program name.
@@ -90,6 +92,19 @@ func getArgs(argv []string) Arguments {
 			Help:     "user:password required by the SOCKS proxies from -D and -R (Optional, without it they need no login)",
 		})
 
+	keepAlive := parser.Int("", "keepalive",
+		&argparse.Options{
+			Required: false,
+			Help:     "Seconds between SSH keepalives to the server, 0 disables them (Optional)",
+			Default:  15,
+		})
+	keepAliveMax := parser.Int("", "keepalive-max",
+		&argparse.Options{
+			Required: false,
+			Help:     "Missed keepalives in a row before the connection is closed (Optional)",
+			Default:  3,
+		})
+
 	argErr := parser.Parse(argv)
 
 	if argErr != nil {
@@ -108,6 +123,10 @@ func getArgs(argv []string) Arguments {
 	}
 	if *passWord == "" && *identity == "" {
 		log.Fatal(parser.Usage("one of --password or --identity is required"))
+	}
+
+	if *keepAlive < 0 || *keepAliveMax < 1 {
+		log.Fatal(parser.Usage("--keepalive must be 0 or more and --keepalive-max 1 or more"))
 	}
 
 	dynamicUser, dynamicPass, err := socks.ParseCredentials(*dynamicAuth)
@@ -134,16 +153,18 @@ func getArgs(argv []string) Arguments {
 	}
 
 	return Arguments{
-		remoteHost:  *remoteHost,
-		sshPort:     *sshPort,
-		userName:    *userName,
-		passWord:    *passWord,
-		identity:    *identity,
-		local:       parse("-L", *local, 1),
-		remote:      parse("-R", *remote, 0),
-		dynamic:     parse("-D", *dynamic, -1),
-		dynamicUser: dynamicUser,
-		dynamicPass: dynamicPass,
+		remoteHost:   *remoteHost,
+		sshPort:      *sshPort,
+		userName:     *userName,
+		passWord:     *passWord,
+		identity:     *identity,
+		local:        parse("-L", *local, 1),
+		remote:       parse("-R", *remote, 0),
+		dynamic:      parse("-D", *dynamic, -1),
+		dynamicUser:  dynamicUser,
+		dynamicPass:  dynamicPass,
+		keepAlive:    *keepAlive,
+		keepAliveMax: *keepAliveMax,
 	}
 }
 
@@ -309,6 +330,10 @@ func Run(argv []string) {
 	}
 	defer sshConn.Close()
 	log.Printf("Remote: %s\n", sshConn.ServerVersion())
+
+	// Notice a dead server, and keep NAT and firewall state alive on an idle
+	// connection.
+	go tunnel.KeepAlive(sshConn, time.Duration(args.keepAlive)*time.Second, args.keepAliveMax, nil)
 
 	if err := startForwards(sshConn, args); err != nil {
 		log.Fatal(err)

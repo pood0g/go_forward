@@ -97,10 +97,27 @@ func get_args(argv []string) Arguments {
 			Default:  "go_forward_server.log",
 		})
 
+	keepAlive := parser.Int("", "keepalive",
+		&argparse.Options{
+			Required: false,
+			Help:     "Seconds between SSH keepalives to the client, 0 disables them (Optional)",
+			Default:  15,
+		})
+	keepAliveMax := parser.Int("", "keepalive-max",
+		&argparse.Options{
+			Required: false,
+			Help:     "Missed keepalives in a row before the connection is closed (Optional)",
+			Default:  3,
+		})
+
 	argErr := parser.Parse(argv)
 
 	if argErr != nil {
 		log.Fatal(parser.Usage(argErr))
+	}
+
+	if *keepAlive < 0 || *keepAliveMax < 1 {
+		log.Fatal(parser.Usage("--keepalive must be 0 or more and --keepalive-max 1 or more"))
 	}
 
 	if *addKey != "" && *authorizedKeys == "" {
@@ -145,6 +162,8 @@ func get_args(argv []string) Arguments {
 		dynamicAddr:        dynamicAddr,
 		dynamicUser:        dynamicUser,
 		dynamicPass:        dynamicPass,
+		keepAlive:          *keepAlive,
+		keepAliveMax:       *keepAliveMax,
 		pidFile:            *pidFile,
 		logFile:            *logFile,
 	}
