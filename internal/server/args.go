@@ -6,7 +6,7 @@ import (
 
 	"github.com/akamensky/argparse"
 
-	"go_forward/internal/socks"
+	"go_forward/internal/secret"
 	"go_forward/internal/tunnel"
 )
 
@@ -34,10 +34,10 @@ func get_args(argv []string) Arguments {
 			Help:     "The username for authentication to the SSH server (Required unless --stop)",
 		})
 
-	passWord := parser.String("P", "password",
+	passWord := parser.Flag("P", "password",
 		&argparse.Options{
 			Required: false,
-			Help:     "The password for authentication to the SSH server (Optional, one of password or authorized keys is required)",
+			Help:     "Prompt for the password clients log in with, or read it from $" + secret.PasswordEnv + " (Optional, one of password or authorized keys is required)",
 		})
 
 	authorizedKeys := parser.String("K", "authorized-keys",
@@ -74,7 +74,7 @@ func get_args(argv []string) Arguments {
 	dynamicAuth := parser.String("", "dynamic-auth",
 		&argparse.Options{
 			Required: false,
-			Help:     "user:password the --dynamic proxy requires (Optional, without it the proxy needs no login)",
+			Help:     "Username the --dynamic proxy requires. Prompts for the password, or reads it from $" + secret.ProxyPasswordEnv + " (Optional, without it the proxy needs no login)",
 		})
 
 	stop := parser.Flag("s", "stop",
@@ -124,10 +124,6 @@ func get_args(argv []string) Arguments {
 		log.Fatal(parser.Usage("--authorized-keys is required with --add-key"))
 	}
 
-	dynamicUser, dynamicPass, err := socks.ParseCredentials(*dynamicAuth)
-	if err != nil {
-		log.Fatal(parser.Usage(err))
-	}
 	dynamicAddr := ""
 	if *dynamic != "" {
 		f, err := tunnel.ParseForward(*dynamic)
@@ -144,8 +140,25 @@ func get_args(argv []string) Arguments {
 		if *userName == "" {
 			log.Fatal(parser.Usage("--username is required"))
 		}
-		if *passWord == "" && *authorizedKeys == "" {
+		if !*passWord && *authorizedKeys == "" {
 			log.Fatal(parser.Usage("one of --password or --authorized-keys is required"))
+		}
+	}
+
+	// Passwords are read after the options are checked, so a mistake is
+	// reported before anything is typed. --stop and --add-key need none.
+	password, dynamicPass := "", ""
+	if !*stop && *addKey == "" {
+		var err error
+		if *passWord {
+			if password, err = secret.Read("Password for "+*userName, secret.PasswordEnv, true); err != nil {
+				log.Fatal(err)
+			}
+		}
+		if *dynamicAuth != "" {
+			if dynamicPass, err = secret.Read("SOCKS proxy password for "+*dynamicAuth, secret.ProxyPasswordEnv, true); err != nil {
+				log.Fatal(err)
+			}
 		}
 	}
 
@@ -153,14 +166,14 @@ func get_args(argv []string) Arguments {
 		port:               *port,
 		iface:              *iface,
 		userName:           *userName,
-		passWord:           *passWord,
+		passWord:           password,
 		hostKeyFile:        *hostKeyFile,
 		authorizedKeysFile: *authorizedKeys,
 		daemon:             *daemon,
 		stop:               *stop,
 		addKey:             *addKey,
 		dynamicAddr:        dynamicAddr,
-		dynamicUser:        dynamicUser,
+		dynamicUser:        *dynamicAuth,
 		dynamicPass:        dynamicPass,
 		keepAlive:          *keepAlive,
 		keepAliveMax:       *keepAliveMax,

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"go_forward/internal/secret"
 )
 
 // daemonEnv marks a process as the detached child started by startDaemon.
@@ -35,6 +37,14 @@ func startDaemon(arguments Arguments) {
 
 	cmd := exec.Command(exe, os.Args[1:]...)
 	cmd.Env = append(os.Environ(), daemonEnv+"=1")
+	// The daemon cannot prompt, so passwords typed here are handed over in
+	// its environment, which unlike the command line only its owner can read.
+	if arguments.passWord != "" {
+		cmd.Env = append(cmd.Env, secret.PasswordEnv+"="+arguments.passWord)
+	}
+	if arguments.dynamicPass != "" {
+		cmd.Env = append(cmd.Env, secret.ProxyPasswordEnv+"="+arguments.dynamicPass)
+	}
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = detachAttr()

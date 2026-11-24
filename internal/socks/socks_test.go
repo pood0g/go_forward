@@ -33,14 +33,3 @@ func TestRemoteResolution(t *testing.T) {
 		t.Errorf("dialer got %q, want the unresolved name", got)
 	}
 }
-
-func TestParseCredentials(t *testing.T) {
-	if u, p, err := ParseCredentials("me:pa:ss"); err != nil || u != "me" || p != "pa:ss" {
-		t.Errorf("got %q %q %v", u, p, err)
-	}
-	for _, bad := range []string{"me", "me:", ":pw"} {
-		if _, _, err := ParseCredentials(bad); err == nil {
-			t.Errorf("ParseCredentials(%q) succeeded, want error", bad)
-		}
-	}
-}

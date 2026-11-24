@@ -13,6 +13,7 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 	"golang.org/x/term"
 
+	"go_forward/internal/secret"
 	"go_forward/internal/socks"
 	"go_forward/internal/tunnel"
 )
@@ -56,10 +57,10 @@ func getArgs(argv []string) Arguments {
 			Required: false,
 			Help:     "The username for authentication to the SSH server (Required unless --generate-key)",
 		})
-	passWord := parser.String("P", "password",
+	passWord := parser.Flag("P", "password",
 		&argparse.Options{
 			Required: false,
-			Help:     "The password for authentication to the SSH server (Optional, one of password or identity is required)",
+			Help:     "Prompt for a password to log in with, or read it from $" + secret.PasswordEnv + " (Optional, one of password or identity is required)",
 		})
 	identity := parser.String("k", "identity",
 		&argparse.Options{
@@ -89,7 +90,7 @@ func getArgs(argv []string) Arguments {
 	dynamicAuth := parser.String("", "dynamic-auth",
 		&argparse.Options{
 			Required: false,
-			Help:     "user:password required by the SOCKS proxies from -D and -R (Optional, without it they need no login)",
+			Help:     "Username required by the SOCKS proxies from -D and -R. Prompts for the password, or reads it from $" + secret.ProxyPasswordEnv + " (Optional, without it they need no login)",
 		})
 
 	keepAlive := parser.Int("", "keepalive",
@@ -121,7 +122,7 @@ func getArgs(argv []string) Arguments {
 	if *remoteHost == "" || *userName == "" {
 		log.Fatal(parser.Usage("--host and --username are required"))
 	}
-	if *passWord == "" && *identity == "" {
+	if !*passWord && *identity == "" {
 		log.Fatal(parser.Usage("one of --password or --identity is required"))
 	}
 
@@ -129,9 +130,21 @@ func getArgs(argv []string) Arguments {
 		log.Fatal(parser.Usage("--keepalive must be 0 or more and --keepalive-max 1 or more"))
 	}
 
-	dynamicUser, dynamicPass, err := socks.ParseCredentials(*dynamicAuth)
-	if err != nil {
-		log.Fatal(parser.Usage(err))
+	password := ""
+	if *passWord {
+		var err error
+		password, err = secret.Read(fmt.Sprintf("Password for %s@%s", *userName, *remoteHost), secret.PasswordEnv, false)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	dynamicPass := ""
+	if *dynamicAuth != "" {
+		var err error
+		dynamicPass, err = secret.Read("SOCKS proxy password for "+*dynamicAuth, secret.ProxyPasswordEnv, true)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	parse := func(flag string, specs []string, target int) []tunnel.Forward {
@@ -156,12 +169,12 @@ func getArgs(argv []string) Arguments {
 		remoteHost:   *remoteHost,
 		sshPort:      *sshPort,
 		userName:     *userName,
-		passWord:     *passWord,
+		passWord:     password,
 		identity:     *identity,
 		local:        parse("-L", *local, 1),
 		remote:       parse("-R", *remote, 0),
 		dynamic:      parse("-D", *dynamic, -1),
-		dynamicUser:  dynamicUser,
+		dynamicUser:  *dynamicAuth,
 		dynamicPass:  dynamicPass,
 		keepAlive:    *keepAlive,
 		keepAliveMax: *keepAliveMax,

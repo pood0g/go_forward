@@ -2,29 +2,16 @@ package socks
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"net"
 	"os"
-	"strings"
 
 	"github.com/akamensky/argparse"
 	"github.com/things-go/go-socks5"
-)
 
-// ParseCredentials splits a user:password value. An empty value means the proxy
-// needs no login, and both returned strings are empty.
-func ParseCredentials(spec string) (string, string, error) {
-	if spec == "" {
-		return "", "", nil
-	}
-	user, password, ok := strings.Cut(spec, ":")
-	if !ok || user == "" || password == "" {
-		return "", "", errors.New("expected user:password")
-	}
-	return user, password, nil
-}
+	"go_forward/internal/secret"
+)
 
 // Dialer makes the proxy's outgoing connections.
 type Dialer func(ctx context.Context, network, addr string) (net.Conn, error)
@@ -98,10 +85,10 @@ func Run(argv []string) {
 			Default:  "socker",
 		})
 
-	password := parser.String("P", "pass",
+	askPassword := parser.Flag("P", "pass",
 		&argparse.Options{
 			Required: false,
-			Help:     "Password to use for proxy",
+			Help:     "Require a login. Prompts for the password, or reads it from $" + secret.ProxyPasswordEnv,
 		})
 
 	argErr := parser.Parse(argv)
@@ -111,16 +98,24 @@ func Run(argv []string) {
 		os.Exit(1)
 	}
 
+	password := ""
+	if *askPassword {
+		var err error
+		if password, err = secret.Read("SOCKS proxy password for "+*username, secret.ProxyPasswordEnv, true); err != nil {
+			log.Fatal(err)
+		}
+	}
+
 	// set the listener string
 	listnr := net.JoinHostPort(*iface, *port)
 	fmt.Printf("Starting SOCKS5 Proxy Listening on %s\n\n", listnr)
-	if len(*password) > 0 {
+	if len(password) > 0 {
 		fmt.Printf("Auth Mode enabled...\n\tUsername: %s\n\n", *username)
 	}
 
 	// A plain proxy: clients and exit are the same machine, so every command
 	// works as the library provides it.
-	proxy := socks5.NewServer(options(*username, *password)...)
+	proxy := socks5.NewServer(options(*username, password)...)
 	if err := proxy.ListenAndServe("tcp", listnr); err != nil {
 		log.Fatal(err)
 	}
