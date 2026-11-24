@@ -83,9 +83,9 @@ Connects to a server and opens a remote port there, forwarding each connection t
 - `-U, --username` (required): user to log in as.
 - `-P, --password` (optional): password. One of `--password` or `--identity` is required.
 - `-k, --identity` (optional): private key file. Encrypted keys prompt for the passphrase.
-- `-g, --generate-key`: create an unencrypted ed25519 key pair at the `--identity` path (private key
-  mode 0600, public key at `<path>.pub`), print the public key and exit. Existing files are never
-  overwritten.
+- `-g, --generate-key`: create an ed25519 key pair at the `--identity` path (private key mode 0600,
+  public key at `<path>.pub`), print the public key and exit. It asks for an optional passphrase:
+  press Enter for none, or type one twice. Existing files are never overwritten.
 - `-r, --remote_port` (default `1080`): port to open on the server. `0` lets the server pick a free
   port; the port it chose is printed in the log.
 - `-l, --local_port` (default `1080`): local port that receives the forwarded connections.

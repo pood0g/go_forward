@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/term"
 )
 
 // generateKeyPair creates an unencrypted ed25519 key pair. The private key is
@@ -28,11 +30,21 @@ func generateKeyPair(path string) error {
 		}
 	}
 
+	passphrase, err := askNewPassphrase()
+	if err != nil {
+		return err
+	}
+
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return err
 	}
-	block, err := ssh.MarshalPrivateKey(priv, "go_forward")
+	var block *pem.Block
+	if len(passphrase) == 0 {
+		block, err = ssh.MarshalPrivateKey(priv, "go_forward")
+	} else {
+		block, err = ssh.MarshalPrivateKeyWithPassphrase(priv, "go_forward", passphrase)
+	}
 	if err != nil {
 		return err
 	}
@@ -50,10 +62,45 @@ func generateKeyPair(path string) error {
 		return err
 	}
 
-	fmt.Printf("private key written to %s\n", path)
+	if len(passphrase) == 0 {
+		fmt.Printf("private key written to %s (no passphrase)\n", path)
+	} else {
+		fmt.Printf("private key written to %s (encrypted)\n", path)
+	}
 	fmt.Printf("public key written to %s:\n\n%s\n\n", pubPath, pubLine)
 	fmt.Printf("add it to a server with:\n  go_forward server --add-key %q -K <authorized_keys>\n", pubLine)
 	return nil
+}
+
+// askNewPassphrase asks for a passphrase for the new key. Pressing Enter gives
+// no passphrase. A non-empty passphrase is asked for twice, and both must match.
+func askNewPassphrase() ([]byte, error) {
+	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
+		fmt.Println("stdin is not a terminal, creating the key without a passphrase")
+		return nil, nil
+	}
+
+	fmt.Print("Passphrase (empty for none): ")
+	first, err := term.ReadPassword(fd)
+	fmt.Println()
+	if err != nil {
+		return nil, fmt.Errorf("reading passphrase: %w", err)
+	}
+	if len(first) == 0 {
+		return nil, nil
+	}
+
+	fmt.Print("Confirm passphrase: ")
+	second, err := term.ReadPassword(fd)
+	fmt.Println()
+	if err != nil {
+		return nil, fmt.Errorf("reading passphrase: %w", err)
+	}
+	if !bytes.Equal(first, second) {
+		return nil, errors.New("passphrases do not match, no key was created")
+	}
+	return first, nil
 }
 
 // writeNewFile creates path with the given mode and fails if it already exists.
