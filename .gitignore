@@ -1,3 +1,6 @@
 go_forward
 go_forward.exe
 known_hosts
+ssh_host_ed25519_key
+go_forward_server.pid
+go_forward_server.log
