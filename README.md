@@ -14,6 +14,8 @@ Requires Go 1.26 or newer. Dependencies are vendored in `vendor/`, so no network
 
     go build -o go_forward .
 
+Run the tests, which include in-process end-to-end runs of every forward, with `go test ./...`.
+
 Cross-compiling works the same way, for example `GOOS=windows GOARCH=amd64 go build -o go_forward.exe .`.
 
 ## Typical setup
@@ -113,8 +115,9 @@ Key setup:
     ./go_forward client -g -k ./id_ed25519
     ./go_forward server -a ./id_ed25519.pub -K authorized_keys
 
-Host keys are checked against `./known_hosts`. An unknown host key asks for confirmation before it
-is saved.
+Host keys are checked against `./known_hosts` (OpenSSH format). An unknown host key is shown with its
+fingerprint and saved if you confirm it. If a saved host's key changes, the client refuses to connect
+and names the line to remove.
 
 ## Dynamic (SOCKS) proxies
 
@@ -129,6 +132,10 @@ the SSH connection:
 `client -R 1080` is the same reverse dynamic forward as OpenSSH's and works with any server.
 `server -D 1080` is for when the proxy should be set on the server; the client registers itself when
 it connects, and requests fail while no client is connected. Several can be used at once.
+
+Host names sent to the proxy are looked up on the side connections leave from, so names that only
+resolve on the far network work, and no DNS lookups happen on the proxy's side. These proxies support
+CONNECT only (TCP); BIND and UDP ASSOCIATE would open sockets on the wrong machine.
 
 ## socks
 
@@ -152,3 +159,4 @@ on armon's original.
     internal/client       SSH client
     internal/socks        SOCKS5 proxy
     internal/tunnel       forward parsing, piping, and the server-to-client dial channel
+    internal/testutil     helpers for the end-to-end tests

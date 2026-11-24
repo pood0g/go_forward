@@ -1,7 +1,6 @@
 package server
 
 import (
-	"io"
 	"log"
 	"net"
 	"strconv"
@@ -9,6 +8,8 @@ import (
 
 	"github.com/gliderlabs/ssh"
 	gossh "golang.org/x/crypto/ssh"
+
+	"go_forward/internal/tunnel"
 )
 
 const forwardedTCPChannelType = "forwarded-tcpip"
@@ -173,14 +174,5 @@ func openForwardedChannel(conn *gossh.ServerConn, c net.Conn, bindAddr string, b
 		return
 	}
 	go gossh.DiscardRequests(reqs)
-	go func() {
-		defer ch.Close()
-		defer c.Close()
-		io.Copy(ch, c)
-	}()
-	go func() {
-		defer ch.Close()
-		defer c.Close()
-		io.Copy(c, ch)
-	}()
+	tunnel.Pipe(ch, c)
 }

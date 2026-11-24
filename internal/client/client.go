@@ -1,15 +1,16 @@
 package client
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"log"
 	"net"
 	"os"
+	"time"
 
 	"github.com/akamensky/argparse"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 	"golang.org/x/term"
 
 	"go_forward/internal/socks"
@@ -146,34 +147,49 @@ func getArgs(argv []string) Arguments {
 	}
 }
 
-func getKhFile(fileName, hostKey string) error {
-	_, err := os.Stat(fileName)
+// hostKeyCallback checks server host keys against the OpenSSH known_hosts
+// file at path. An unknown host is shown to the user and saved if accepted. A
+// host whose key differs from the saved one is refused.
+func hostKeyCallback(path string) (ssh.HostKeyCallback, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0600)
 	if err != nil {
-		log.Println("Known hosts file doesnt exist, creating...")
-		os.Create(knownHostsFile)
-		os.Chmod(knownHostsFile, 0600)
-		return getKhFile(fileName, hostKey)
+		return nil, fmt.Errorf("opening known hosts %s: %w", path, err)
 	}
-	khFile, err := os.OpenFile(fileName, os.O_RDONLY, 0600)
-	if err != nil {
-		log.Fatalln("It's Dead Jim")
-	}
-	defer khFile.Close()
+	f.Close()
 
-	scanner := bufio.NewScanner(khFile)
-	for scanner.Scan() {
-		if hostKey == scanner.Text()+"\n" {
-			log.Println("Host is known, connecting.")
-			return nil
+	check, err := knownhosts.New(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading known hosts %s: %w", path, err)
+	}
+
+	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		var keyErr *knownhosts.KeyError
+		if err := check(hostname, remote, key); !errors.As(err, &keyErr) {
+			if err == nil {
+				log.Println("Host is known, connecting.")
+			}
+			return err
 		}
-	}
-	return fmt.Errorf("key not found in %s", knownHostsFile)
-}
 
-func writeToFile(fileName, line string) {
-	file, _ := os.OpenFile(fileName, os.O_WRONLY, 0600)
-	file.Seek(0, 2)
-	file.WriteString(line)
+		fingerprint := ssh.FingerprintSHA256(key)
+		if len(keyErr.Want) > 0 {
+			want := keyErr.Want[0]
+			return fmt.Errorf("host key for %s has CHANGED to %s %s, refusing to connect. "+
+				"If the change is expected, remove line %d of %s", hostname, key.Type(), fingerprint, want.Line, want.Filename)
+		}
+
+		fmt.Printf("\nHost %s is unknown.\nHost key: %s %s\n", hostname, key.Type(), fingerprint)
+		if !askUserBool("Do you want to connect and add it to known hosts (y/n)? ") {
+			return errors.New("host key rejected by user")
+		}
+		kh, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			return fmt.Errorf("saving host key: %w", err)
+		}
+		defer kh.Close()
+		_, err = fmt.Fprintln(kh, knownhosts.Line([]string{hostname}, key))
+		return err
+	}, nil
 }
 
 func askUserBool(question string) bool {
@@ -181,32 +197,7 @@ func askUserBool(question string) bool {
 	fmt.Print(question)
 	fmt.Scanln(&vrfy)
 	fmt.Println()
-	if vrfy == "y" || vrfy == "Y" {
-		return true
-	}
-	return false
-}
-
-func getHostKey(hostname string, remote net.Addr, key ssh.PublicKey) error {
-
-	// function for user to manually verify host key.
-	var known error
-
-	hostKey := string(ssh.MarshalAuthorizedKey(key))
-	log.Printf("Connected to %s", hostname)
-
-	if err := getKhFile(knownHostsFile, fmt.Sprintf("%s %s", hostname, hostKey)); err != nil {
-		log.Println(err)
-		fmt.Printf("\nHostKey: %s", hostKey)
-
-		if askUserBool("\nHost unknown, do you want to connect and add to known hosts (y/n)? ") {
-			writeToFile(knownHostsFile, fmt.Sprintf("%s %s", hostname, ssh.MarshalAuthorizedKey(key)))
-			return nil
-		} else {
-			return fmt.Errorf("host key rejected by user")
-		}
-	}
-	return known
+	return vrfy == "y" || vrfy == "Y"
 }
 
 // loadSigner reads a private key file. If the key is encrypted it asks for the
@@ -241,6 +232,11 @@ func loadSigner(path string) (ssh.Signer, error) {
 
 func makeSshConfig(user, password, identity string) (*ssh.ClientConfig, error) {
 
+	checkHostKey, err := hostKeyCallback(knownHostsFile)
+	if err != nil {
+		return nil, err
+	}
+
 	var auth []ssh.AuthMethod
 	if identity != "" {
 		signer, err := loadSigner(identity)
@@ -261,7 +257,8 @@ func makeSshConfig(user, password, identity string) (*ssh.ClientConfig, error) {
 			ssh.KeyAlgoED25519,
 			ssh.KeyAlgoRSASHA512,
 		},
-		HostKeyCallback: getHostKey,
+		HostKeyCallback: checkHostKey,
+		Timeout:         15 * time.Second,
 	}
 	return &config, nil
 }
@@ -313,6 +310,17 @@ func Run(argv []string) {
 	defer sshConn.Close()
 	log.Printf("Remote: %s\n", sshConn.ServerVersion())
 
+	if err := startForwards(sshConn, args); err != nil {
+		log.Fatal(err)
+	}
+
+	err = sshConn.Wait()
+	log.Printf("connection closed: %v", err)
+}
+
+// startForwards sets up the forwards in args over sshConn. They run until the
+// connection closes.
+func startForwards(sshConn *ssh.Client, args Arguments) error {
 	// Let the server's own SOCKS proxy (server -D) send connections through
 	// this client. Servers without support ignore the request.
 	sshConn.SendRequest(tunnel.RegisterRequest, false, nil)
@@ -322,7 +330,7 @@ func Run(argv []string) {
 	for _, f := range args.remote {
 		l, err := sshConn.Listen("tcp", f.Listen)
 		if err != nil {
-			log.Fatalf("-R %s: %s", f.Listen, err)
+			return fmt.Errorf("-R %s: %w", f.Listen, err)
 		}
 		if f.Target == "" {
 			log.Printf("SOCKS5 proxy on server %s, connections leave from here", l.Addr())
@@ -338,7 +346,7 @@ func Run(argv []string) {
 	for _, f := range args.local {
 		l, err := net.Listen("tcp", f.Listen)
 		if err != nil {
-			log.Fatalf("-L %s: %s", f.Listen, err)
+			return fmt.Errorf("-L %s: %w", f.Listen, err)
 		}
 		log.Printf("%s forwards to %s from the server", l.Addr(), f.Target)
 		go acceptLoop(l, f.Target, sshConn.Dial)
@@ -348,13 +356,11 @@ func Run(argv []string) {
 	for _, f := range args.dynamic {
 		l, err := net.Listen("tcp", f.Listen)
 		if err != nil {
-			log.Fatalf("-D %s: %s", f.Listen, err)
+			return fmt.Errorf("-D %s: %w", f.Listen, err)
 		}
 		log.Printf("SOCKS5 proxy on %s, connections leave from the server", l.Addr())
 		proxy := socks.New(args.dynamicUser, args.dynamicPass, sshConn.DialContext)
 		go func() { log.Printf("-D %s: %s", l.Addr(), proxy.Serve(l)) }()
 	}
-
-	err = sshConn.Wait()
-	log.Printf("connection closed: %v", err)
+	return nil
 }

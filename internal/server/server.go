@@ -1,9 +1,9 @@
 package server
 
 import (
-	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 
 	"github.com/gliderlabs/ssh"
@@ -40,15 +40,32 @@ func Run(argv []string) {
 		watchDaemonSignals(arguments.pidFile)
 	}
 
-	hostKey, err := loadOrCreateHostKey(arguments.hostKeyFile)
+	server, err := newServer(arguments)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	log.Printf("starting SSH server on port %s:%s...", arguments.iface, arguments.port)
+	log.Printf("starting SSH server on %s...", server.Addr)
 
-	server := ssh.Server{
-		Addr: fmt.Sprintf("%s:%s", arguments.iface, arguments.port),
+	if arguments.dynamicAddr != "" {
+		log.Printf("starting SOCKS5 proxy on %s, connections leave from the connected client", arguments.dynamicAddr)
+		go func() {
+			log.Fatal(socks.Serve(arguments.dynamicAddr, arguments.dynamicUser, arguments.dynamicPass, dialThroughClient))
+		}()
+	}
+
+	log.Fatal(server.ListenAndServe())
+}
+
+// newServer builds the SSH server described by arguments.
+func newServer(arguments Arguments) (*ssh.Server, error) {
+	hostKey, err := loadOrCreateHostKey(arguments.hostKeyFile)
+	if err != nil {
+		return nil, err
+	}
+
+	server := &ssh.Server{
+		Addr: net.JoinHostPort(arguments.iface, arguments.port),
 		Handler: ssh.Handler(func(s ssh.Session) {
 			io.WriteString(s, "Remote forwarding only...\n")
 			<-s.Context().Done()
@@ -82,18 +99,11 @@ func Run(argv []string) {
 	if arguments.authorizedKeysFile != "" {
 		keys, err := loadAuthorizedKeys(arguments.authorizedKeysFile)
 		if err != nil {
-			log.Fatal(err)
+			return nil, err
 		}
 		log.Printf("loaded %d authorized key(s) from %s", len(keys), arguments.authorizedKeysFile)
 		server.PublicKeyHandler = publicKeyHandler(arguments.userName, keys)
 	}
 
-	if arguments.dynamicAddr != "" {
-		log.Printf("starting SOCKS5 proxy on %s, connections leave from the connected client", arguments.dynamicAddr)
-		go func() {
-			log.Fatal(socks.Serve(arguments.dynamicAddr, arguments.dynamicUser, arguments.dynamicPass, dialThroughClient))
-		}()
-	}
-
-	log.Fatal(server.ListenAndServe())
+	return server, nil
 }

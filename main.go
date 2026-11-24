@@ -15,7 +15,7 @@ func usage() {
 
 commands:
   server   run the SSH server (accepts remote and local port forwards)
-  client   connect to a server and forward its remote port to a local service
+  client   connect to a server with local, remote and SOCKS forwards
   socks    serve a SOCKS5 proxy
 
 Run 'go_forward <command> -h' for the options of a command.
