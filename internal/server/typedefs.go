@@ -12,4 +12,7 @@ type Arguments struct {
 	pidFile string
 	logFile string
 	addKey string
+	dynamicAddr string
+	dynamicUser string
+	dynamicPass string
 }

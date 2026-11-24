@@ -52,6 +52,9 @@ both.
 - `-s, --stop`: stop the daemon recorded in the pid file.
 - `-a, --add-key <key or .pub file>`: add a public key to the `--authorized-keys` file and exit. The
   server does not start. Adding a key that is already present does nothing.
+- `-D, --dynamic [addr:]port`: start a SOCKS5 proxy on the server. Its connections leave from the
+  connected client. A bare port listens on 127.0.0.1.
+- `--dynamic-auth user:password` (optional): login required by the `--dynamic` proxy.
 - `--pid-file` (default `go_forward_server.pid`), `--log-file` (default `go_forward_server.log`).
 
 At least one of `--password` or `--authorized-keys` is required.
@@ -89,6 +92,9 @@ Connects to a server and opens a remote port there, forwarding each connection t
 - `-r, --remote_port` (default `1080`): port to open on the server. `0` lets the server pick a free
   port; the port it chose is printed in the log.
 - `-l, --local_port` (default `1080`): local port that receives the forwarded connections.
+- `-D, --dynamic [addr:]port` (optional): start a SOCKS5 proxy on the client. Its connections leave
+  from the server. A bare port listens on 127.0.0.1.
+- `--dynamic-auth user:password` (optional): login required by the `-D` proxy.
 
 Key setup:
 
@@ -97,6 +103,18 @@ Key setup:
 
 Host keys are checked against `./known_hosts`. An unknown host key asks for confirmation before it
 is saved.
+
+## Dynamic (SOCKS) proxies
+
+A SOCKS5 proxy can run on either side. The connections it makes leave from the other side, through
+the SSH connection:
+
+- `client -D 1080`: the proxy runs on the client, and connections leave from the server.
+- `server -D 1080`: the proxy runs on the server, and connections leave from the connected client.
+  The client registers itself when it connects, so no extra setup is needed on the client.
+
+Both sides can be used at once. With the server side, `server -D` needs a client connected to dial
+through; without one, requests fail.
 
 ## socks
 

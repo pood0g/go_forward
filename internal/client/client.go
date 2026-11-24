@@ -12,6 +12,9 @@ import (
 	"github.com/akamensky/argparse"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/term"
+
+	"go_forward/internal/socks"
+	"go_forward/internal/tunnel"
 )
 
 var knownHostsFile = "./known_hosts"
@@ -26,6 +29,9 @@ type Arguments struct {
 	passWord   string
 	identity   string
 	generateKey bool
+	dynamicAddr string
+	dynamicUser string
+	dynamicPass string
 }
 
 // getArgs parses argv, where argv[0] is the program name.
@@ -76,10 +82,30 @@ func getArgs(argv []string) Arguments {
 			Help:     "Private key file for public key authentication, prompts for a passphrase if encrypted (Optional, one of password or identity is required)",
 		})
 
+	dynamic := parser.String("D", "dynamic",
+		&argparse.Options{
+			Required: false,
+			Help:     "Start a SOCKS5 proxy on [addr:]port. Its connections leave from the SSH server. A bare port listens on 127.0.0.1 (Optional)",
+		})
+	dynamicAuth := parser.String("", "dynamic-auth",
+		&argparse.Options{
+			Required: false,
+			Help:     "user:password the --dynamic proxy requires (Optional, without it the proxy needs no login)",
+		})
+
 	argErr := parser.Parse(argv)
 
 	if argErr != nil {
 		log.Fatal(parser.Usage(argErr))
+	}
+
+	dynamicUser, dynamicPass, err := socks.ParseCredentials(*dynamicAuth)
+	if err != nil {
+		log.Fatal(parser.Usage(err))
+	}
+	dynamicAddr := ""
+	if *dynamic != "" {
+		dynamicAddr = socks.ListenAddr(*dynamic)
 	}
 
 	if *generateKey {
@@ -104,6 +130,9 @@ func getArgs(argv []string) Arguments {
 		userName:   *userName,
 		passWord:   *passWord,
 		identity:   *identity,
+		dynamicAddr:  dynamicAddr,
+		dynamicUser:  dynamicUser,
+		dynamicPass:  dynamicPass,
 	}
 }
 
@@ -288,6 +317,19 @@ func Run(argv []string) {
 	} else {
 		_, boundPort, _ := net.SplitHostPort(remotePort.Addr().String())
 		log.Printf("Port forward successful, server listening on port %s.", boundPort)
+	}
+
+	// Let the server send SOCKS connections through this client. Servers
+	// without support ignore the request.
+	sshConn.SendRequest(tunnel.RegisterRequest, false, nil)
+	go tunnel.ServeDials(sshConn.HandleChannelOpen(tunnel.DialChannel))
+
+	// Local SOCKS5 proxy whose connections leave from the server.
+	if args.dynamicAddr != "" {
+		log.Printf("starting SOCKS5 proxy on %s, connections leave from the server", args.dynamicAddr)
+		go func() {
+			log.Fatal(socks.Serve(args.dynamicAddr, args.dynamicUser, args.dynamicPass, sshConn.DialContext))
+		}()
 	}
 
 	// close conn cleanly when main() is completed

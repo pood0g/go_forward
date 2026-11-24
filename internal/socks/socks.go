@@ -1,13 +1,58 @@
 package socks
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os"
+	"strings"
 
 	"github.com/akamensky/argparse"
 	"github.com/things-go/go-socks5"
 )
+
+// ListenAddr turns a -D value into a listen address. A bare port listens on
+// 127.0.0.1, and a value containing a colon is used as it is.
+func ListenAddr(spec string) string {
+	if strings.Contains(spec, ":") {
+		return spec
+	}
+	return net.JoinHostPort("127.0.0.1", spec)
+}
+
+// ParseCredentials splits a user:password value. An empty value means the proxy
+// needs no login, and both returned strings are empty.
+func ParseCredentials(spec string) (string, string, error) {
+	if spec == "" {
+		return "", "", nil
+	}
+	user, password, ok := strings.Cut(spec, ":")
+	if !ok || user == "" || password == "" {
+		return "", "", errors.New("expected user:password")
+	}
+	return user, password, nil
+}
+
+// Serve runs a SOCKS5 proxy on listenAddr until it fails. dial decides how
+// outgoing connections are made; nil connects directly. A non-empty password
+// enables username and password authentication.
+func Serve(listenAddr, username, password string, dial func(ctx context.Context, network, addr string) (net.Conn, error)) error {
+	opt := []socks5.Option{
+		socks5.WithLogger(socks5.NewLogger(log.New(os.Stdout, "socks5: ", log.LstdFlags))),
+	}
+	if dial != nil {
+		opt = append(opt, socks5.WithDial(dial))
+	}
+	if len(password) > 0 {
+		creds := socks5.StaticCredentials{username: password}
+		auth := socks5.UserPassAuthenticator{Credentials: creds}
+		opt = append(opt, socks5.WithAuthMethods([]socks5.Authenticator{auth}))
+	}
+
+	return socks5.NewServer(opt...).ListenAndServe("tcp", listenAddr)
+}
 
 // Run serves a SOCKS5 proxy. argv is the command line with argv[0] as the
 // program name.
@@ -52,24 +97,11 @@ func Run(argv []string) {
 	// set the listener string
 	var listnr = fmt.Sprintf("%s:%s", *iface, *port)
 	fmt.Printf("Starting SOCKS5 Proxy Listening on %s\n\n", listnr)
-
-	// create a slice for the options passed to NewServer
-	opt := []socks5.Option{
-		socks5.WithLogger(socks5.NewLogger(log.New(os.Stdout, "socks5: ", log.LstdFlags))),
-	}
-
-	// Create a SOCKS5 server
 	if len(*password) > 0 {
 		fmt.Printf("Auth Mode enabled...\n\tUsername: %s\n\n", *username)
-		creds := socks5.StaticCredentials{*username: *password}
-		auth := socks5.UserPassAuthenticator{Credentials: creds}
-		opt = append(opt, socks5.WithAuthMethods([]socks5.Authenticator{auth}))
 	}
 
-	server := socks5.NewServer(opt...)
-
-	// Serve SOCKS5 Proxy
-	if err := server.ListenAndServe("tcp", listnr); err != nil {
+	if err := Serve(listnr, *username, *password, nil); err != nil {
 		panic(err)
 	}
 }

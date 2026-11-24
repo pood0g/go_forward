@@ -4,6 +4,8 @@ import (
 	"log"
 
 	"github.com/akamensky/argparse"
+
+	"go_forward/internal/socks"
 )
 
 // get_args parses argv, where argv[0] is the program name.
@@ -61,6 +63,18 @@ func get_args(argv []string) Arguments {
 		Help: "Add a public key to the --authorized-keys file and exit. Takes an OpenSSH public key line or the path to a .pub file (Optional)",
 	})
 
+	dynamic := parser.String("D", "dynamic",
+	&argparse.Options{
+		Required: false,
+		Help: "Start a SOCKS5 proxy on [addr:]port. Its connections leave from the connected client. A bare port listens on 127.0.0.1 (Optional)",
+	})
+
+	dynamicAuth := parser.String("", "dynamic-auth",
+	&argparse.Options{
+		Required: false,
+		Help: "user:password the --dynamic proxy requires (Optional, without it the proxy needs no login)",
+	})
+
 	stop := parser.Flag("s", "stop",
 	&argparse.Options{
 		Required: false,
@@ -91,6 +105,15 @@ func get_args(argv []string) Arguments {
 		log.Fatal(parser.Usage("--authorized-keys is required with --add-key"))
 	}
 
+	dynamicUser, dynamicPass, err := socks.ParseCredentials(*dynamicAuth)
+	if err != nil {
+		log.Fatal(parser.Usage(err))
+	}
+	dynamicAddr := ""
+	if *dynamic != "" {
+		dynamicAddr = socks.ListenAddr(*dynamic)
+	}
+
 	if !*stop && *addKey == "" {
 		if *userName == "" {
 			log.Fatal(parser.Usage("--username is required"))
@@ -110,6 +133,9 @@ func get_args(argv []string) Arguments {
 		daemon: *daemon,
 		stop: *stop,
 		addKey: *addKey,
+		dynamicAddr: dynamicAddr,
+		dynamicUser: dynamicUser,
+		dynamicPass: dynamicPass,
 		pidFile: *pidFile,
 		logFile: *logFile,
 	}

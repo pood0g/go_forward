@@ -7,6 +7,9 @@ import (
 	"os"
 
 	"github.com/gliderlabs/ssh"
+
+	"go_forward/internal/socks"
+	"go_forward/internal/tunnel"
 )
 
 // Run starts the SSH server. argv is the command line with argv[0] as the
@@ -61,6 +64,7 @@ func Run(argv []string) {
 		RequestHandlers: map[string]ssh.RequestHandler{
 			"tcpip-forward":        handleTCPIPForward,
 			"cancel-tcpip-forward": handleTCPIPForward,
+			tunnel.RegisterRequest: handleRegister,
 		},
 		ChannelHandlers: map[string]ssh.ChannelHandler{
 			"session":      ssh.DefaultSessionHandler,
@@ -82,6 +86,13 @@ func Run(argv []string) {
 		}
 		log.Printf("loaded %d authorized key(s) from %s", len(keys), arguments.authorizedKeysFile)
 		server.PublicKeyHandler = publicKeyHandler(arguments.userName, keys)
+	}
+
+	if arguments.dynamicAddr != "" {
+		log.Printf("starting SOCKS5 proxy on %s, connections leave from the connected client", arguments.dynamicAddr)
+		go func() {
+			log.Fatal(socks.Serve(arguments.dynamicAddr, arguments.dynamicUser, arguments.dynamicPass, dialThroughClient))
+		}()
 	}
 
 	log.Fatal(server.ListenAndServe())
