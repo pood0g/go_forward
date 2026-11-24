@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
@@ -19,17 +18,16 @@ import (
 
 var knownHostsFile = "./known_hosts"
 
-
 type Arguments struct {
-	remotePort string
-	localPort  string
-	remoteHost string
-	sshPort string
-	userName   string
-	passWord   string
-	identity   string
+	remoteHost  string
+	sshPort     string
+	userName    string
+	passWord    string
+	identity    string
 	generateKey bool
-	dynamicAddr string
+	local       []tunnel.Forward
+	remote      []tunnel.Forward
+	dynamic     []tunnel.Forward
 	dynamicUser string
 	dynamicPass string
 }
@@ -37,39 +35,23 @@ type Arguments struct {
 // getArgs parses argv, where argv[0] is the program name.
 func getArgs(argv []string) Arguments {
 
-	parser := argparse.NewParser("go_forward client", "A simple SSH client allowing reverse port forwarding.")
+	parser := argparse.NewParser("go_forward client", "An SSH client for local, remote and dynamic (SOCKS) port forwarding.")
 
-	localPort := parser.String("l", "local_port",
+	remoteHost := parser.String("i", "host",
 		&argparse.Options{
 			Required: false,
-			Help:     "The local port to forward connections to (Optional)",
-			Default: "1080",
+			Help:     "The SSH server to connect to (Required unless --generate-key)",
 		})
-	remotePort := parser.String("r", "remote_port",
+	sshPort := parser.String("p", "port",
 		&argparse.Options{
 			Required: false,
-			Help:     "The port to open on the SSH server, 0 lets the server pick one (Optional)",
-			Default: "1080",
-		})
-	sshPort := parser.String("R", "ssh_port",
-		&argparse.Options{
-			Required: false,
-			Help:     "The port the SSH server listens on (Required unless --generate-key)",
-		})
-	remoteHost := parser.String("i", "ssh_host",
-		&argparse.Options{
-			Required: false,
-			Help:     "The remote host to connect to via SSH (Required unless --generate-key)",
+			Help:     "The port the SSH server listens on (Optional)",
+			Default:  "22",
 		})
 	userName := parser.String("U", "username",
 		&argparse.Options{
 			Required: false,
 			Help:     "The username for authentication to the SSH server (Required unless --generate-key)",
-		})
-	generateKey := parser.Flag("g", "generate-key",
-		&argparse.Options{
-			Required: false,
-			Help:     "Generate an ed25519 key pair at the --identity path, print the public key and exit (Optional)",
 		})
 	passWord := parser.String("P", "password",
 		&argparse.Options{
@@ -81,31 +63,36 @@ func getArgs(argv []string) Arguments {
 			Required: false,
 			Help:     "Private key file for public key authentication, prompts for a passphrase if encrypted (Optional, one of password or identity is required)",
 		})
-
-	dynamic := parser.String("D", "dynamic",
+	generateKey := parser.Flag("g", "generate-key",
 		&argparse.Options{
 			Required: false,
-			Help:     "Start a SOCKS5 proxy on [addr:]port. Its connections leave from the SSH server. A bare port listens on 127.0.0.1 (Optional)",
+			Help:     "Generate an ed25519 key pair at the --identity path, print the public key and exit (Optional)",
+		})
+	local := parser.StringList("L", "local",
+		&argparse.Options{
+			Required: false,
+			Help:     "[bind:]port:host:hostport. Listen here and connect to host:hostport from the server. Repeatable (Optional)",
+		})
+	remote := parser.StringList("R", "remote",
+		&argparse.Options{
+			Required: false,
+			Help:     "[bind:]port:host:hostport listens on the server and connects to host:hostport from here. [bind:]port alone starts a SOCKS5 proxy on the server whose connections leave from here. Repeatable (Optional)",
+		})
+	dynamic := parser.StringList("D", "dynamic",
+		&argparse.Options{
+			Required: false,
+			Help:     "[bind:]port. Start a SOCKS5 proxy here whose connections leave from the server. Repeatable (Optional)",
 		})
 	dynamicAuth := parser.String("", "dynamic-auth",
 		&argparse.Options{
 			Required: false,
-			Help:     "user:password the --dynamic proxy requires (Optional, without it the proxy needs no login)",
+			Help:     "user:password required by the SOCKS proxies from -D and -R (Optional, without it they need no login)",
 		})
 
 	argErr := parser.Parse(argv)
 
 	if argErr != nil {
 		log.Fatal(parser.Usage(argErr))
-	}
-
-	dynamicUser, dynamicPass, err := socks.ParseCredentials(*dynamicAuth)
-	if err != nil {
-		log.Fatal(parser.Usage(err))
-	}
-	dynamicAddr := ""
-	if *dynamic != "" {
-		dynamicAddr = socks.ListenAddr(*dynamic)
 	}
 
 	if *generateKey {
@@ -115,24 +102,47 @@ func getArgs(argv []string) Arguments {
 		return Arguments{identity: *identity, generateKey: true}
 	}
 
-	if *sshPort == "" || *remoteHost == "" || *userName == "" {
-		log.Fatal(parser.Usage("--ssh_port, --ssh_host and --username are required"))
+	if *remoteHost == "" || *userName == "" {
+		log.Fatal(parser.Usage("--host and --username are required"))
 	}
 	if *passWord == "" && *identity == "" {
 		log.Fatal(parser.Usage("one of --password or --identity is required"))
 	}
 
+	dynamicUser, dynamicPass, err := socks.ParseCredentials(*dynamicAuth)
+	if err != nil {
+		log.Fatal(parser.Usage(err))
+	}
+
+	parse := func(flag string, specs []string, target int) []tunnel.Forward {
+		var out []tunnel.Forward
+		for _, spec := range specs {
+			f, err := tunnel.ParseForward(spec)
+			if err == nil && target > 0 && f.Target == "" {
+				err = fmt.Errorf("%s %q: expected [bind:]port:host:hostport", flag, spec)
+			}
+			if err == nil && target < 0 && f.Target != "" {
+				err = fmt.Errorf("%s %q: expected [bind:]port", flag, spec)
+			}
+			if err != nil {
+				log.Fatal(parser.Usage(err))
+			}
+			out = append(out, f)
+		}
+		return out
+	}
+
 	return Arguments{
-		remotePort: *remotePort,
-		localPort:  *localPort,
-		remoteHost: *remoteHost,
-		sshPort: *sshPort,
-		userName:   *userName,
-		passWord:   *passWord,
-		identity:   *identity,
-		dynamicAddr:  dynamicAddr,
-		dynamicUser:  dynamicUser,
-		dynamicPass:  dynamicPass,
+		remoteHost:  *remoteHost,
+		sshPort:     *sshPort,
+		userName:    *userName,
+		passWord:    *passWord,
+		identity:    *identity,
+		local:       parse("-L", *local, 1),
+		remote:      parse("-R", *remote, 0),
+		dynamic:     parse("-D", *dynamic, -1),
+		dynamicUser: dynamicUser,
+		dynamicPass: dynamicPass,
 	}
 }
 
@@ -256,35 +266,28 @@ func makeSshConfig(user, password, identity string) (*ssh.ClientConfig, error) {
 	return &config, nil
 }
 
-func handleConn(remote net.Conn, local net.Conn) {
-
-	// buffered so the second copy can finish after we return
-	done := make(chan bool, 2)
-
-	go func() {
-		_, err := io.Copy(local, remote)
+// acceptLoop hands each connection on l to a new connection from dial.
+func acceptLoop(l net.Listener, target string, dial func(network, addr string) (net.Conn, error)) {
+	for {
+		conn, err := l.Accept()
 		if err != nil {
-			log.Printf("local > remote: %s", err)
+			log.Printf("%s: %s", l.Addr(), err)
+			return
 		}
-		done <- true
-	}()
-
-	go func() {
-		_, err := io.Copy(remote, local)
-		if err != nil {
-			log.Printf("remote > local: %s", err)
-		}
-		done <- true
-	}()
-
-	// one side closed, so close both to end the other copy
-	<-done
-	remote.Close()
-	local.Close()
+		go func() {
+			out, err := dial("tcp", target)
+			if err != nil {
+				log.Printf("connect to %s: %s", target, err)
+				conn.Close()
+				return
+			}
+			tunnel.Pipe(conn, out)
+		}()
+	}
 }
 
-// Run connects to the SSH server and forwards its remote port to a local
-// service. argv is the command line with argv[0] as the program name.
+// Run connects to the SSH server and sets up the requested forwards. argv is
+// the command line with argv[0] as the program name.
 func Run(argv []string) {
 
 	args := getArgs(argv)
@@ -303,56 +306,55 @@ func Run(argv []string) {
 	}
 
 	// create SSH connection
-	sshConn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%s", args.remoteHost, args.sshPort), cfg)
+	sshConn, err := ssh.Dial("tcp", net.JoinHostPort(args.remoteHost, args.sshPort), cfg)
 	if err != nil {
 		log.Fatalf("%s\n", err)
-	} else {
-		log.Printf("Remote: %s\n", sshConn.ServerVersion())
 	}
+	defer sshConn.Close()
+	log.Printf("Remote: %s\n", sshConn.ServerVersion())
 
-	// Reverse port forward. Port 0 asks the server to pick a free port.
-	remotePort, err := sshConn.Listen("tcp", fmt.Sprintf("127.0.0.1:%s", args.remotePort))
-	if err != nil {
-		log.Fatalf("Could not open remote port: %s", err)
-	} else {
-		_, boundPort, _ := net.SplitHostPort(remotePort.Addr().String())
-		log.Printf("Port forward successful, server listening on port %s.", boundPort)
-	}
-
-	// Let the server send SOCKS connections through this client. Servers
-	// without support ignore the request.
+	// Let the server's own SOCKS proxy (server -D) send connections through
+	// this client. Servers without support ignore the request.
 	sshConn.SendRequest(tunnel.RegisterRequest, false, nil)
 	go tunnel.ServeDials(sshConn.HandleChannelOpen(tunnel.DialChannel))
 
-	// Local SOCKS5 proxy whose connections leave from the server.
-	if args.dynamicAddr != "" {
-		log.Printf("starting SOCKS5 proxy on %s, connections leave from the server", args.dynamicAddr)
-		go func() {
-			log.Fatal(socks.Serve(args.dynamicAddr, args.dynamicUser, args.dynamicPass, sshConn.DialContext))
-		}()
+	// Remote forwards listen on the server. Port 0 lets the server pick one.
+	for _, f := range args.remote {
+		l, err := sshConn.Listen("tcp", f.Listen)
+		if err != nil {
+			log.Fatalf("-R %s: %s", f.Listen, err)
+		}
+		if f.Target == "" {
+			log.Printf("SOCKS5 proxy on server %s, connections leave from here", l.Addr())
+			proxy := socks.New(args.dynamicUser, args.dynamicPass, nil)
+			go func() { log.Printf("-R %s: %s", l.Addr(), proxy.Serve(l)) }()
+		} else {
+			log.Printf("server %s forwards to %s from here", l.Addr(), f.Target)
+			go acceptLoop(l, f.Target, net.Dial)
+		}
 	}
 
-	// close conn cleanly when main() is completed
-	defer sshConn.Close()
-	defer remotePort.Close()
-
-	// forever loop
-	for {
-		// accept connections from remote
-		remote, err := remotePort.Accept()
+	// Local forwards listen here and connect from the server.
+	for _, f := range args.local {
+		l, err := net.Listen("tcp", f.Listen)
 		if err != nil {
-			log.Fatalf("Remote: %s", err)
+			log.Fatalf("-L %s: %s", f.Listen, err)
 		}
-
-		// try to connect to local service, continue if unsuccessful
-		local, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%s", args.localPort))
-		if err != nil {
-			log.Printf("Local: %s", err)
-			remote.Close()
-			continue
-		}
-
-		// copy data between the connections, one goroutine per connection
-		go handleConn(remote, local)
+		log.Printf("%s forwards to %s from the server", l.Addr(), f.Target)
+		go acceptLoop(l, f.Target, sshConn.Dial)
 	}
+
+	// Local SOCKS5 proxies whose connections leave from the server.
+	for _, f := range args.dynamic {
+		l, err := net.Listen("tcp", f.Listen)
+		if err != nil {
+			log.Fatalf("-D %s: %s", f.Listen, err)
+		}
+		log.Printf("SOCKS5 proxy on %s, connections leave from the server", l.Addr())
+		proxy := socks.New(args.dynamicUser, args.dynamicPass, sshConn.DialContext)
+		go func() { log.Printf("-D %s: %s", l.Addr(), proxy.Serve(l)) }()
+	}
+
+	err = sshConn.Wait()
+	log.Printf("connection closed: %v", err)
 }

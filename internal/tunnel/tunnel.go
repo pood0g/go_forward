@@ -5,7 +5,6 @@
 package tunnel
 
 import (
-	"io"
 	"log"
 	"net"
 	"time"
@@ -63,17 +62,7 @@ func serveDial(newCh gossh.NewChannel) {
 		return
 	}
 	go gossh.DiscardRequests(reqs)
-
-	go func() {
-		defer ch.Close()
-		defer target.Close()
-		io.Copy(ch, target)
-	}()
-	go func() {
-		defer ch.Close()
-		defer target.Close()
-		io.Copy(target, ch)
-	}()
+	Pipe(ch, target)
 }
 
 // channelConn adapts an SSH channel to net.Conn. SSH channels have no

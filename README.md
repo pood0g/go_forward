@@ -3,7 +3,7 @@
 One executable with three commands: an SSH server, an SSH client, and a SOCKS5 proxy.
 
     go_forward server   run the SSH server (remote and local port forwards)
-    go_forward client   connect to a server and forward its remote port to a local service
+    go_forward client   connect to a server with local, remote and SOCKS forwards
     go_forward socks    serve a SOCKS5 proxy
 
 Run `go_forward <command> -h` for the options of a command.
@@ -18,17 +18,22 @@ Cross-compiling works the same way, for example `GOOS=windows GOARCH=amd64 go bu
 
 ## Typical setup
 
-Run a SOCKS5 proxy on the client machine and forward it through the server:
+The server can run on either machine, whichever one the other can connect to. A SOCKS proxy can
+then be put on either side, exiting from the other:
 
-    # client machine
-    ./go_forward socks -i 127.0.0.1 -p 1080 -U socks -P <password>
-    ./go_forward client -i <server> -R 2222 -U <user> -k <identity> -l 1080 -r 1080
+    # proxy on the client machine, connections leave from the server
+    ./go_forward client -i <server> -p 2222 -U <user> -k <identity> -D 1080
 
-    # server side
+    # proxy on the server machine, connections leave from the client
+    ./go_forward client -i <server> -p 2222 -U <user> -k <identity> -R 1080
+    # or, decided on the server instead of the client
+    ./go_forward server -p 2222 -U <user> -K authorized_keys -D 1080
+
+    # then, on whichever machine has the proxy
     curl --socks5-hostname 127.0.0.1:1080 https://example.com
 
-Without `-P`, `socks` accepts unauthenticated connections. The forwarded port is reachable by any
-local user on the server, so set a password.
+Proxies listen on 127.0.0.1 unless an address is given. Any local user on that machine can use
+them, so add `--dynamic-auth user:password` on shared machines.
 
 ## server
 
@@ -75,26 +80,33 @@ Remote forwards belong to the connection that opened them and close when it disc
 
 ## client
 
-Connects to a server and opens a remote port there, forwarding each connection to a local port.
+Connects to a server and sets up the forwards given on the command line. The forward options follow
+OpenSSH and can each be repeated. With no forwards the client only connects, which is enough for
+`server -D`.
 
-    ./go_forward client -i <server> -R <ssh port> -U <user> -P <password>
-    ./go_forward client -i <server> -R <ssh port> -U <user> -k <private key>
+    ./go_forward client -i <server> -p <ssh port> -U <user> -k <private key> -D 1080
+    ./go_forward client -i <server> -U <user> -P <password> -R 9000:127.0.0.1:80
     ./go_forward client -g -k ./id_ed25519                  # create a key pair
 
-- `-i, --ssh_host` (required): server address.
-- `-R, --ssh_port` (required): port the server's SSH listener is on.
+- `-i, --host` (required): server address.
+- `-p, --port` (default `22`): port the server's SSH listener is on.
 - `-U, --username` (required): user to log in as.
 - `-P, --password` (optional): password. One of `--password` or `--identity` is required.
 - `-k, --identity` (optional): private key file. Encrypted keys prompt for the passphrase.
 - `-g, --generate-key`: create an ed25519 key pair at the `--identity` path (private key mode 0600,
   public key at `<path>.pub`), print the public key and exit. It asks for an optional passphrase:
   press Enter for none, or type one twice. Existing files are never overwritten.
-- `-r, --remote_port` (default `1080`): port to open on the server. `0` lets the server pick a free
-  port; the port it chose is printed in the log.
-- `-l, --local_port` (default `1080`): local port that receives the forwarded connections.
-- `-D, --dynamic [addr:]port` (optional): start a SOCKS5 proxy on the client. Its connections leave
-  from the server. A bare port listens on 127.0.0.1.
-- `--dynamic-auth user:password` (optional): login required by the `-D` proxy.
+- `-L, --local [bind:]port:host:hostport`: listen on the client and connect to `host:hostport`
+  from the server.
+- `-R, --remote [bind:]port:host:hostport`: listen on the server and connect to `host:hostport`
+  from the client. Port `0` lets the server pick a free port; the chosen port is logged.
+- `-R, --remote [bind:]port`: start a SOCKS5 proxy on the server whose connections leave from the
+  client (reverse dynamic forward).
+- `-D, --dynamic [bind:]port`: start a SOCKS5 proxy on the client whose connections leave from the
+  server.
+- `--dynamic-auth user:password` (optional): login required by the SOCKS proxies from `-D` and `-R`.
+
+`bind` defaults to `127.0.0.1`; `*` or an empty bind (`:1080`) listens on all interfaces.
 
 Key setup:
 
@@ -109,12 +121,14 @@ is saved.
 A SOCKS5 proxy can run on either side. The connections it makes leave from the other side, through
 the SSH connection:
 
-- `client -D 1080`: the proxy runs on the client, and connections leave from the server.
-- `server -D 1080`: the proxy runs on the server, and connections leave from the connected client.
-  The client registers itself when it connects, so no extra setup is needed on the client.
+| Proxy runs on | Exits from | Use |
+|---------------|------------|-----|
+| client        | server     | `client -D 1080` |
+| server        | client     | `client -R 1080` or `server -D 1080` |
 
-Both sides can be used at once. With the server side, `server -D` needs a client connected to dial
-through; without one, requests fail.
+`client -R 1080` is the same reverse dynamic forward as OpenSSH's and works with any server.
+`server -D 1080` is for when the proxy should be set on the server; the client registers itself when
+it connects, and requests fail while no client is connected. Several can be used at once.
 
 ## socks
 
@@ -137,3 +151,4 @@ on armon's original.
     internal/server       SSH server, host keys, auth, forwarding, daemon mode
     internal/client       SSH client
     internal/socks        SOCKS5 proxy
+    internal/tunnel       forward parsing, piping, and the server-to-client dial channel

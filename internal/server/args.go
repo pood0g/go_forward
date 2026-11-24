@@ -1,11 +1,13 @@
 package server
 
 import (
+	"errors"
 	"log"
 
 	"github.com/akamensky/argparse"
 
 	"go_forward/internal/socks"
+	"go_forward/internal/tunnel"
 )
 
 // get_args parses argv, where argv[0] is the program name.
@@ -111,7 +113,14 @@ func get_args(argv []string) Arguments {
 	}
 	dynamicAddr := ""
 	if *dynamic != "" {
-		dynamicAddr = socks.ListenAddr(*dynamic)
+		f, err := tunnel.ParseForward(*dynamic)
+		if err == nil && f.Target != "" {
+			err = errors.New("--dynamic takes [addr:]port")
+		}
+		if err != nil {
+			log.Fatal(parser.Usage(err))
+		}
+		dynamicAddr = f.Listen
 	}
 
 	if !*stop && *addKey == "" {
