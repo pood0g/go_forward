@@ -184,8 +184,7 @@ Serves a SOCKS5 proxy with optional username and password authentication.
 - `-P, --pass` (optional): require a login; prompts for the password. Without it the proxy accepts
   unauthenticated connections.
 
-The SOCKS5 implementation is [go-socks5](https://github.com/things-go/go-socks5) by thinkgos, built
-on armon's original.
+Only CONNECT is supported.
 
 ## Layout
 
