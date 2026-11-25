@@ -1,7 +1,6 @@
 package main
 
 import (
-	b64 "encoding/base64"
 	"fmt"
 	"os"
 
@@ -23,8 +22,7 @@ Run 'go_forward <command> -h' for the options of a command.
 
 func main() {
 
-	banner, _ := b64.StdEncoding.DecodeString(BANNER)
-	fmt.Printf("%s\n", banner)
+	fmt.Printf("%s\n", BANNER)
 
 	if len(os.Args) < 2 {
 		usage()

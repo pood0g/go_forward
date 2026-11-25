@@ -1,10 +1,11 @@
 package main
 
-const BANNER = `
-ICAgICAgICAgICAgICAgICAgICAgX19fXyAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg
-ICAgX18KICAgX19fXyBfX19fXyAgICAgICAvIF9fL19fXyAgX19fX19fICAgICAgX19fX19fIF9f
-X19fX19fX18vIC8KICAvIF9fIGAvIF9fIFwgICAgIC8gL18vIF9fIFwvIF9fXy8gfCAvfCAvIC8g
-X18gYC8gX19fLyBfXyAgLyAKIC8gL18vIC8gL18vIC8gICAgLyBfXy8gL18vIC8gLyAgIHwgfC8g
-fC8gLyAvXy8gLyAvICAvIC9fLyAvICAKIFxfXywgL1xfX19fL19fX18vXy8gIFxfX19fL18vICAg
-IHxfXy98X18vXF9fLF8vXy8gICBcX18sXy8gICAKL19fX18vICAgICAvX19fX18vICAgICAgICAg
-ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAK`
+// BANNER is printed at startup. Each line is a quoted string so the
+// backticks and trailing spaces in the art survive editing.
+const BANNER = "" +
+	"                     ____                                   __\n" +
+	"   ____ _____       / __/___  ______      ______ __________/ /\n" +
+	"  / __ `/ __ \\     / /_/ __ \\/ ___/ | /| / / __ `/ ___/ __  / \n" +
+	" / /_/ / /_/ /    / __/ /_/ / /   | |/ |/ / /_/ / /  / /_/ /  \n" +
+	" \\__, /\\____/____/_/  \\____/_/    |__/|__/\\__,_/_/   \\__,_/   \n" +
+	"/____/     /_____/                                            \n"
