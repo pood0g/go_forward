@@ -15,9 +15,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/akamensky/argparse"
-
-	"go_forward/internal/secret"
 	"go_forward/internal/tunnel"
 )
 
@@ -278,65 +275,4 @@ func replyCode(err error) byte {
 		return repHostUnreachable
 	}
 	return repFailure
-}
-
-// Run serves a SOCKS5 proxy. argv is the command line with argv[0] as the
-// program name.
-func Run(argv []string) {
-
-	parser := argparse.NewParser("go_forward socks", "Creates a SOCKS5 proxy")
-
-	iface := parser.String("i", "interface",
-		&argparse.Options{
-			Required: false,
-			Help:     "The interface to listen on.",
-			Default:  "127.0.0.1",
-		})
-
-	port := parser.String("p", "port",
-		&argparse.Options{
-			Required: false,
-			Help:     "The port to listen on",
-			Default:  "1080",
-		})
-
-	username := parser.String("U", "user",
-		&argparse.Options{
-			Required: false,
-			Help:     "Username to use for proxy",
-			Default:  "socker",
-		})
-
-	askPassword := parser.Flag("P", "pass",
-		&argparse.Options{
-			Required: false,
-			Help:     "Require a login. Prompts for the password, or reads it from $" + secret.ProxyPasswordEnv,
-		})
-
-	argErr := parser.Parse(argv)
-
-	if argErr != nil {
-		fmt.Print(parser.Usage(argErr))
-		os.Exit(1)
-	}
-
-	password := ""
-	if *askPassword {
-		var err error
-		if password, err = secret.Read("SOCKS proxy password for "+*username, secret.ProxyPasswordEnv, true); err != nil {
-			log.Fatal(err)
-		}
-	}
-
-	// set the listener string
-	listnr := net.JoinHostPort(*iface, *port)
-	fmt.Printf("Starting SOCKS5 Proxy Listening on %s\n\n", listnr)
-	if len(password) > 0 {
-		fmt.Printf("Auth Mode enabled...\n\tUsername: %s\n\n", *username)
-	}
-
-	proxy := New(*username, password, nil)
-	if err := proxy.ListenAndServe("tcp", listnr); err != nil {
-		log.Fatal(err)
-	}
 }

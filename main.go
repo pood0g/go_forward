@@ -7,7 +7,6 @@ import (
 
 	"go_forward/internal/client"
 	"go_forward/internal/server"
-	"go_forward/internal/socks"
 )
 
 func usage() {
@@ -16,7 +15,6 @@ func usage() {
 commands:
   server   run the SSH server (accepts remote and local port forwards)
   client   connect to a server with local, remote and SOCKS forwards
-  socks    serve a SOCKS5 proxy
 
 Run 'go_forward <command> -h' for the options of a command.
 `)
@@ -41,8 +39,6 @@ func main() {
 		server.Run(argv)
 	case "client":
 		client.Run(argv)
-	case "socks":
-		socks.Run(argv)
 	default:
 		usage()
 	}

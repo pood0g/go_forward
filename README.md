@@ -1,10 +1,9 @@
 # go_forward
 
-One executable with three commands: an SSH server, an SSH client, and a SOCKS5 proxy.
+One executable with two commands: an SSH server and an SSH client.
 
     go_forward server   run the SSH server (remote and local port forwards)
     go_forward client   connect to a server with local, remote and SOCKS forwards
-    go_forward socks    serve a SOCKS5 proxy
 
 Run `go_forward <command> -h` for the options of a command.
 
@@ -151,7 +150,7 @@ login, SOCKS proxies) are asked for twice.
 For unattended runs, set the password in the environment instead and no prompt is shown:
 
 - `GO_FORWARD_PASSWORD`: the SSH password (`server -P`, `client -P`).
-- `GO_FORWARD_PROXY_PASSWORD`: the SOCKS proxy password (`--dynamic-auth`, `socks -P`).
+- `GO_FORWARD_PROXY_PASSWORD`: the SOCKS proxy password (`--dynamic-auth`).
 
 `server -d` prompts before going to the background and hands the passwords to the daemon in its
 environment. Only the same user and root can read a process's environment.
@@ -172,26 +171,12 @@ defaults a dead peer is noticed within about 45 seconds:
 `--keepalive 0` turns keepalives off. Any SSH peer works on the other end, since even peers that do
 not know the request reply to it.
 
-## socks
-
-Serves a SOCKS5 proxy with optional username and password authentication.
-
-    ./go_forward socks -i 127.0.0.1 -p 1080 -U socks -P
-
-- `-i, --interface` (default `127.0.0.1`): address to listen on.
-- `-p, --port` (default `1080`): port to listen on.
-- `-U, --user` (default `socker`): username, used when `-P` is set.
-- `-P, --pass` (optional): require a login; prompts for the password. Without it the proxy accepts
-  unauthenticated connections.
-
-Only CONNECT is supported.
-
 ## Layout
 
     main.go               command dispatch and banner
     constants.go          banner
     internal/server       SSH server, host keys, auth, forwarding, daemon mode
     internal/client       SSH client
-    internal/socks        SOCKS5 proxy
+    internal/socks        SOCKS5 proxy for -D, -R and server --dynamic
     internal/tunnel       forward parsing, piping, and the server-to-client dial channel
     internal/testutil     helpers for the end-to-end tests
